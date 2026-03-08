@@ -60,7 +60,14 @@ function MicrositePreview({ colors, fonts, companyName, logoUrl }: {
           className="flex items-center justify-between px-8 py-4">
           <div className="flex items-center gap-3">
             {logoUrl ? (
-              <img src={logoUrl} alt="logo" className="h-7 w-auto object-contain" />
+              logoUrl.startsWith('<') ? (
+                <span
+                  className="h-7 flex items-center [&_svg]:h-full [&_svg]:w-auto [&_img]:h-full [&_img]:w-auto"
+                  dangerouslySetInnerHTML={{ __html: logoUrl }}
+                />
+              ) : (
+                <img src={logoUrl} alt="logo" className="h-7 w-auto object-contain" />
+              )
             ) : (
               <span style={{ fontFamily: `'${fonts.display}', sans-serif`, color: colors.primary, fontWeight: 700, fontSize: 16 }}>
                 {companyName || 'Your Company'}
@@ -339,7 +346,14 @@ export default function OnboardingPage() {
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 rounded-lg border border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden">
                   {logoUrl ? (
-                    <img src={logoUrl} alt="logo" className="w-full h-full object-contain p-1" />
+                    logoUrl.startsWith('<') ? (
+                      <span
+                        className="w-full h-full flex items-center justify-center p-1 [&_svg]:max-h-full [&_svg]:max-w-full [&_img]:max-h-full"
+                        dangerouslySetInnerHTML={{ __html: logoUrl }}
+                      />
+                    ) : (
+                      <img src={logoUrl} alt="logo" className="w-full h-full object-contain p-1" />
+                    )
                   ) : (
                     <span className="text-lg font-bold text-gray-300">
                       {companyName.charAt(0) || '?'}

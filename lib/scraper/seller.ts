@@ -70,42 +70,48 @@ function extractText($: cheerio.CheerioAPI): string {
     .join('\n')
 }
 
-function svgToDataUrl(svgHtml: string): string {
-  return `data:image/svg+xml;base64,${Buffer.from(svgHtml).toString('base64')}`
-}
-
 function resolveUrl(href: string, baseUrl: string): string | null {
   if (!href || href.startsWith('data:')) return null
   try { return new URL(href, baseUrl).href } catch { return null }
 }
 
+// Returns either a URL string or raw HTML markup (for inline SVGs).
+// Callers must check: logoContent.startsWith('<') → render as HTML, else as img src.
 function extractLogo($: cheerio.CheerioAPI, baseUrl: string): string | null {
-  // 1. Inline SVG in header/nav or logo-named containers (most common on modern sites)
-  const inlineSvgSelectors = [
-    'header svg', 'nav svg',
-    '[class*="logo" i] svg', '[id*="logo" i] svg',
-    '[class*="brand" i] svg', '[id*="brand" i] svg',
+  // 1. Look for logo containers that may hold one or more inline SVGs
+  const containerSelectors = [
+    'header a', 'nav a',
+    'header [class*="logo" i], nav [class*="logo" i]',
+    '[class*="logo" i]', '[id*="logo" i]',
+    '[class*="brand" i]',
   ]
-  for (const selector of inlineSvgSelectors) {
-    const el = $(selector).first()
-    if (el.length) {
-      const svgHtml = $.html(el)
-      if (svgHtml && svgHtml.length > 50) return svgToDataUrl(svgHtml)
+  for (const selector of containerSelectors) {
+    const container = $(selector).first()
+    if (!container.length) continue
+    const svgs = container.find('svg')
+    if (svgs.length > 0) {
+      // Serialize the full container innerHTML — captures icon + wordmark combos
+      const html = container.html()?.trim()
+      if (html && html.length > 50) return html
     }
   }
 
-  // 2. Linked image/SVG — img, object, embed — header/nav first, then logo-named, then src containing "logo"
+  // 2. Standalone inline SVG anywhere in header/nav
+  const standaloneSvg = $('header svg, nav svg').first()
+  if (standaloneSvg.length) {
+    const html = $.html(standaloneSvg)
+    if (html && html.length > 50) return html
+  }
+
+  // 3. Linked image/SVG — img, object, embed
   const linkedSelectors = [
-    // img tags
     'header img[class*="logo" i], header img[id*="logo" i], header img[alt*="logo" i]',
     'nav img[class*="logo" i], nav img[id*="logo" i], nav img[alt*="logo" i]',
     '[class*="logo" i] img, [id*="logo" i] img',
     'header a img:first-of-type, nav a img:first-of-type',
     'img[src*="logo" i]',
-    // object/embed with SVG
     'header object[data$=".svg"], nav object[data$=".svg"]',
-    'header embed[src$=".svg"], nav embed[src$=".svg"]',
-    '[class*="logo" i] object[data], [id*="logo" i] object[data]',
+    '[class*="logo" i] object[data]',
   ]
   for (const selector of linkedSelectors) {
     const el = $(selector).first()
@@ -114,18 +120,15 @@ function extractLogo($: cheerio.CheerioAPI, baseUrl: string): string | null {
     if (resolved) return resolved
   }
 
-  // 3. Favicon (brand mark fallback)
+  // 4. Favicon fallback
   const favicon =
     $('link[rel="icon"][href]').first().attr('href') ||
     $('link[rel="shortcut icon"][href]').first().attr('href')
-  if (favicon) {
-    const resolved = resolveUrl(favicon, baseUrl)
-    if (resolved) return resolved
-  }
+  if (favicon) { const r = resolveUrl(favicon, baseUrl); if (r) return r }
 
-  // 4. og:image as last resort
+  // 5. og:image last resort
   const og = $('meta[property="og:image"]').attr('content')
-  if (og) { const resolved = resolveUrl(og, baseUrl); if (resolved) return resolved }
+  if (og) { const r = resolveUrl(og, baseUrl); if (r) return r }
 
   return null
 }
