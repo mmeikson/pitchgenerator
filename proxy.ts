@@ -47,8 +47,8 @@ export async function proxy(request: NextRequest) {
   }
 
   // Has session but hasn't completed onboarding — redirect to onboarding
-  // (skip if already heading there)
-  if (!pathname.startsWith('/onboarding')) {
+  // (skip if already heading there, or if this is an API call)
+  if (!pathname.startsWith('/onboarding') && !pathname.startsWith('/api/')) {
     const { data: profile } = await supabase
       .from('profiles')
       .select('onboarding_complete')
