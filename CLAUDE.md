@@ -31,9 +31,14 @@ npm run lint      # ESLint
 
 Supabase Auth handles Google OAuth and email/password. LinkedIn is **out of scope for MVP**.
 
-- `middleware.ts` guards all app routes: no session → `/login`, incomplete onboarding → `/onboarding`
+- `proxy.ts` guards all app routes: no session → `/login`, incomplete onboarding → `/onboarding`
+- **Next.js 16 uses `proxy.ts` (not `middleware.ts`) and the exported function must be named `proxy`, not `middleware`**
 - OAuth redirect target: `/api/auth/callback`
 - Supabase creates an `auth.users` record; a trigger auto-creates a matching `public.profiles` row
+
+### Supabase client instantiation
+
+**Never call `createClient()` from `lib/supabase/client.ts` at the component render level** — even in `'use client'` components, the shell is server-rendered at build time and will throw without env vars. Always call `createClient()` inside event handlers or async functions, not at the top of a component body.
 
 ### Background jobs
 
