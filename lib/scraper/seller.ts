@@ -185,52 +185,68 @@ function extractColors($: cheerio.CheerioAPI, externalCss = ''): Partial<typeof 
   return { ...externalColors, ...inlineColors }
 }
 
-function extractFontFamiliesFromCss(css: string): string[] {
-  const families: string[] = []
+// Generic/system font names to exclude
+const GENERIC_FONTS = new Set([
+  'serif', 'sans-serif', 'monospace', 'cursive', 'fantasy', 'system-ui',
+  '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Helvetica Neue',
+  'Helvetica', 'Arial', 'inherit', 'initial', 'unset', 'normal',
+])
 
-  // Google Fonts @import
+// Extract named fonts from CSS, ranked by how frequently they appear.
+// Frequency = brand signal: a font used 20 times is almost certainly intentional.
+function extractFontFamiliesFromCss(css: string): string[] {
+  const counts = new Map<string, number>()
+
+  // 1. Google Fonts @import — highest confidence
   for (const match of css.matchAll(/@import[^;]*fonts\.googleapis\.com[^;]*family=([^&;'"]+)/gi)) {
     decodeURIComponent(match[1]).split('|').forEach((f) => {
       const name = f.split(':')[0].replace(/\+/g, ' ').trim()
-      if (name) families.push(name)
+      if (name && !GENERIC_FONTS.has(name)) counts.set(name, (counts.get(name) ?? 0) + 100)
     })
   }
 
-  // @font-face family declarations (catches self-hosted and bundled fonts)
-  for (const match of css.matchAll(/@font-face\s*\{[^}]*font-family\s*:\s*['"]?([^'";,}]+)['"]?/gi)) {
-    const name = match[1].trim()
-    if (name && !families.includes(name)) families.push(name)
+  // 2. @font-face declarations — self-hosted or CDN fonts
+  for (const match of css.matchAll(/@font-face\s*\{[^}]*font-family\s*:\s*['"]?([^'";,}\n]+)['"]?/gi)) {
+    const name = match[1].trim().replace(/^['"]|['"]$/g, '')
+    if (name && !GENERIC_FONTS.has(name)) counts.set(name, (counts.get(name) ?? 0) + 50)
   }
 
-  return families
+  // 3. font-family rule declarations — frequency reveals actual brand fonts
+  for (const match of css.matchAll(/font-family\s*:\s*((?:['"][^'"]+['"]|[\w\s-]+)(?:\s*,\s*(?:['"][^'"]+['"]|[\w\s-]+))*)/gi)) {
+    // Take only the first font in the stack (the preferred one)
+    const first = match[1].split(',')[0].trim().replace(/^['"]|['"]$/g, '').trim()
+    if (first && !GENERIC_FONTS.has(first) && first.length < 60) {
+      counts.set(first, (counts.get(first) ?? 0) + 1)
+    }
+  }
+
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([name]) => name)
 }
 
 function extractFonts($: cheerio.CheerioAPI, externalCss = ''): Partial<typeof DEFAULT_FONTS> {
-  const families: string[] = []
-
-  // Google Fonts link tags
+  // Google Fonts link tags — parse directly (most explicit signal)
+  const linkFamilies: string[] = []
   $('link[href*="fonts.googleapis.com"]').each((_, el) => {
     const href = $(el).attr('href') || ''
     const match = href.match(/family=([^&]+)/)
     if (match) {
       decodeURIComponent(match[1]).split('|').forEach((f) => {
         const name = f.split(':')[0].replace(/\+/g, ' ').trim()
-        if (name) families.push(name)
+        if (name) linkFamilies.push(name)
       })
     }
   })
+  if (linkFamilies.length >= 2) {
+    return { display: linkFamilies[0], body: linkFamilies[1] }
+  }
 
-  // Inline style tags
+  // Fall back to CSS analysis across inline + external
   const inlineCss = $('style').map((_, el) => $(el).text()).get().join('\n')
-  extractFontFamiliesFromCss(inlineCss).forEach((f) => {
-    if (!families.includes(f)) families.push(f)
-  })
+  const allFamilies = extractFontFamiliesFromCss(inlineCss + '\n' + externalCss)
 
-  // External CSS
-  extractFontFamiliesFromCss(externalCss).forEach((f) => {
-    if (!families.includes(f)) families.push(f)
-  })
-
+  const families = [...new Set([...linkFamilies, ...allFamilies])]
   if (families.length === 0) return {}
   return { display: families[0], body: families[1] ?? families[0] }
 }
