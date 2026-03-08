@@ -8,7 +8,8 @@
       "Bash(mkdir:*)",
       "Bash(cp:*)",
       "Bash(npm install:*)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(mv:*)"
     ]
   }
 }
