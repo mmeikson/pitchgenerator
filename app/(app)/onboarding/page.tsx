@@ -62,6 +62,7 @@ function MicrositePreview({ colors, fonts, companyName, logoUrl }: {
             {logoUrl ? (
               logoUrl.startsWith('<') ? (
                 <span
+                  style={{ color: colors.primary }}
                   className="h-7 flex items-center [&_svg]:h-full [&_svg]:w-auto [&_img]:h-full [&_img]:w-auto"
                   dangerouslySetInnerHTML={{ __html: logoUrl }}
                 />
