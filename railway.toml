@@ -5,7 +5,7 @@ builder = "nixpacks"
 nixPkgs = ["nodejs_20"]
 
 [deploy]
-startCommand = "npm run start"
+startCommand = "npm run start -- -p ${PORT}"
 healthcheckPath = "/"
 healthcheckTimeout = 30
 restartPolicyType = "on_failure"
