@@ -318,7 +318,11 @@ export async function scrapeSeller(rawUrl: string): Promise<SellerScrapeResult> 
   const fonts = { ...DEFAULT_FONTS, ...extractFonts($, externalCss) }
   const subpageUrls = findSubpageLinks($, url)
 
-  let allText = `[Homepage]\n${extractText($)}\n\n`
+  const pageTitle = $('title').first().text().trim()
+  const ogSiteName = $('meta[property="og:site_name"]').attr('content')?.trim()
+  const siteName = ogSiteName || pageTitle
+
+  let allText = `[Site Name]: ${siteName}\n\n[Homepage]\n${extractText($)}\n\n`
 
   const subpageResults = await Promise.allSettled(subpageUrls.map(fetchPage))
   for (let i = 0; i < subpageResults.length; i++) {
