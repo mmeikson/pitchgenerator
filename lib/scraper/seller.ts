@@ -133,56 +133,84 @@ function extractLogo($: cheerio.CheerioAPI, baseUrl: string): string | null {
   return null
 }
 
+function normalizeHex(hex: string): string {
+  if (hex.length === 4) return '#' + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3]
+  return hex.toLowerCase()
+}
+
+function luminance(hex: string): number {
+  const h = normalizeHex(hex)
+  const r = parseInt(h.slice(1, 3), 16) / 255
+  const g = parseInt(h.slice(3, 5), 16) / 255
+  const b = parseInt(h.slice(5, 7), 16) / 255
+  return 0.299 * r + 0.587 * g + 0.114 * b
+}
+
 function extractColorsFromCss(css: string): Partial<typeof DEFAULT_COLORS> {
-  const colors: Partial<typeof DEFAULT_COLORS> = {}
+  // Count hex colors by which CSS property they appear in
+  const bgCounts = new Map<string, number>()
+  const fgCounts = new Map<string, number>()
+  const otherCounts = new Map<string, number>()
 
-  const patterns: { regexes: RegExp[]; key: keyof typeof DEFAULT_COLORS }[] = [
-    {
-      key: 'primary',
-      regexes: [
-        /--(?:color[-_]?)?(?:primary|brand|main)\s*:\s*(#[0-9a-fA-F]{3,6})/i,
-        /--(?:clr|c)[-_]?(?:primary|brand|main)\s*:\s*(#[0-9a-fA-F]{3,6})/i,
-      ],
-    },
-    {
-      key: 'accent',
-      regexes: [
-        /--(?:color[-_]?)?(?:accent|highlight|cta|secondary)\s*:\s*(#[0-9a-fA-F]{3,6})/i,
-        /accent-color\s*:\s*(#[0-9a-fA-F]{3,6})/i,
-      ],
-    },
-    {
-      key: 'background',
-      regexes: [
-        /--(?:color[-_]?)?(?:background|bg|surface|base)\s*:\s*(#[0-9a-fA-F]{3,6})/i,
-        /--(?:clr|c)[-_]?(?:bg|background)\s*:\s*(#[0-9a-fA-F]{3,6})/i,
-      ],
-    },
-    {
-      key: 'text',
-      regexes: [
-        /--(?:color[-_]?)?(?:text|foreground|body|copy)\s*:\s*(#[0-9a-fA-F]{3,6})/i,
-        /--(?:clr|c)[-_]?(?:text|fg)\s*:\s*(#[0-9a-fA-F]{3,6})/i,
-      ],
-    },
-  ]
-
-  for (const { regexes, key } of patterns) {
-    for (const regex of regexes) {
-      const match = css.match(regex)
-      if (match) { colors[key] = match[1]; break }
+  for (const match of css.matchAll(/([\w-]+)\s*:\s*([^;{}]+)/g)) {
+    const prop = match[1].toLowerCase()
+    const hexes = (match[2].match(/#[0-9a-fA-F]{3,6}\b/g) ?? []).map(normalizeHex)
+    for (const hex of hexes) {
+      if (prop.includes('background')) {
+        bgCounts.set(hex, (bgCounts.get(hex) ?? 0) + 1)
+      } else if (prop === 'color' || prop === 'fill') {
+        fgCounts.set(hex, (fgCounts.get(hex) ?? 0) + 1)
+      } else if (!prop.includes('border') && !prop.includes('shadow') && !prop.includes('outline')) {
+        otherCounts.set(hex, (otherCounts.get(hex) ?? 0) + 1)
+      }
     }
   }
 
-  return colors
+  const sortDesc = (m: Map<string, number>) =>
+    [...m.entries()].sort((a, b) => b[1] - a[1]).map(([c]) => c)
+
+  const topBg = sortDesc(bgCounts)
+  const topFg = sortDesc(fgCounts)
+  const topOther = sortDesc(otherCounts)
+
+  // Most frequent background-color is the page background
+  const background = topBg[0]
+  const isDark = background ? luminance(background) < 0.4 : false
+
+  // Text: most frequent foreground color that contrasts with background
+  const text = isDark
+    ? topFg.find(c => luminance(c) > 0.5) ?? topFg[0]
+    : topFg.find(c => luminance(c) < 0.5) ?? topFg[0]
+
+  // Accent: most distinctive mid-luminance color (not base, not text)
+  const allColors = [...new Set([...topOther, ...topFg, ...topBg])]
+  const accent = allColors.find(c => {
+    if (c === background || c === text) return false
+    const lum = luminance(c)
+    return lum > 0.05 && lum < 0.95
+  })
+
+  // Primary: for dark sites = background (dark is the brand); for light sites = dominant dark UI color
+  const primary = isDark
+    ? background
+    : (topFg.find(c => luminance(c) < 0.25) ?? topBg.find(c => luminance(c) < 0.25) ?? background)
+
+  const result: Partial<typeof DEFAULT_COLORS> = {}
+  if (background) result.background = background
+  if (text) result.text = text
+  if (accent) result.accent = accent
+  if (primary) result.primary = primary
+
+  return result
 }
 
 function extractColors($: cheerio.CheerioAPI, externalCss = ''): Partial<typeof DEFAULT_COLORS> {
   const inlineCss = $('style').map((_, el) => $(el).text()).get().join('\n')
-  // Inline CSS takes priority over external (more likely to be brand-specific)
-  const inlineColors = extractColorsFromCss(inlineCss)
-  const externalColors = extractColorsFromCss(externalCss)
-  return { ...externalColors, ...inlineColors }
+  // External CSS has more rules; inline CSS (often Webflow/framework injected) may override
+  // Merge with inline taking priority on conflicts
+  const external = extractColorsFromCss(externalCss)
+  const inline = extractColorsFromCss(inlineCss)
+  return { ...external, ...inline }
 }
 
 // Generic/system font names to exclude
