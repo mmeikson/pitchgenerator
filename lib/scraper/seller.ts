@@ -70,34 +70,62 @@ function extractText($: cheerio.CheerioAPI): string {
     .join('\n')
 }
 
+function svgToDataUrl(svgHtml: string): string {
+  return `data:image/svg+xml;base64,${Buffer.from(svgHtml).toString('base64')}`
+}
+
+function resolveUrl(href: string, baseUrl: string): string | null {
+  if (!href || href.startsWith('data:')) return null
+  try { return new URL(href, baseUrl).href } catch { return null }
+}
+
 function extractLogo($: cheerio.CheerioAPI, baseUrl: string): string | null {
-  // Prioritized selectors — header/nav first, then anywhere with "logo" in name
-  const selectors = [
-    'header img[class*="logo" i], header img[id*="logo" i], header img[alt*="logo" i]',
-    'nav img[class*="logo" i], nav img[id*="logo" i], nav img[alt*="logo" i]',
-    '[class*="logo" i] img, [id*="logo" i] img',
-    '[class*="logo" i] svg use, [id*="logo" i] svg',
-    'header a img:first-of-type, nav a img:first-of-type',
-    // Also check src attribute containing "logo"
-    'img[src*="logo" i]',
+  // 1. Inline SVG in header/nav or logo-named containers (most common on modern sites)
+  const inlineSvgSelectors = [
+    'header svg', 'nav svg',
+    '[class*="logo" i] svg', '[id*="logo" i] svg',
+    '[class*="brand" i] svg', '[id*="brand" i] svg',
   ]
-  for (const selector of selectors) {
+  for (const selector of inlineSvgSelectors) {
     const el = $(selector).first()
-    const src = el.attr('src') || el.attr('href') || el.attr('xlink:href')
-    if (src && !src.startsWith('data:')) {
-      try { return new URL(src, baseUrl).href } catch { continue }
+    if (el.length) {
+      const svgHtml = $.html(el)
+      if (svgHtml && svgHtml.length > 50) return svgToDataUrl(svgHtml)
     }
   }
 
-  // Favicon as fallback (better than nothing — at least it's their brand mark)
+  // 2. Linked image/SVG — img, object, embed — header/nav first, then logo-named, then src containing "logo"
+  const linkedSelectors = [
+    // img tags
+    'header img[class*="logo" i], header img[id*="logo" i], header img[alt*="logo" i]',
+    'nav img[class*="logo" i], nav img[id*="logo" i], nav img[alt*="logo" i]',
+    '[class*="logo" i] img, [id*="logo" i] img',
+    'header a img:first-of-type, nav a img:first-of-type',
+    'img[src*="logo" i]',
+    // object/embed with SVG
+    'header object[data$=".svg"], nav object[data$=".svg"]',
+    'header embed[src$=".svg"], nav embed[src$=".svg"]',
+    '[class*="logo" i] object[data], [id*="logo" i] object[data]',
+  ]
+  for (const selector of linkedSelectors) {
+    const el = $(selector).first()
+    const src = el.attr('src') || el.attr('data')
+    const resolved = src ? resolveUrl(src, baseUrl) : null
+    if (resolved) return resolved
+  }
+
+  // 3. Favicon (brand mark fallback)
   const favicon =
     $('link[rel="icon"][href]').first().attr('href') ||
     $('link[rel="shortcut icon"][href]').first().attr('href')
-  if (favicon) { try { return new URL(favicon, baseUrl).href } catch {} }
+  if (favicon) {
+    const resolved = resolveUrl(favicon, baseUrl)
+    if (resolved) return resolved
+  }
 
-  // og:image as absolute last resort
+  // 4. og:image as last resort
   const og = $('meta[property="og:image"]').attr('content')
-  if (og) { try { return new URL(og, baseUrl).href } catch {} }
+  if (og) { const resolved = resolveUrl(og, baseUrl); if (resolved) return resolved }
 
   return null
 }
